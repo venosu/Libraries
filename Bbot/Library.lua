@@ -274,6 +274,7 @@
 
             Parent.InputBegan:Connect(function(Input)
                 if Input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    Library:CloseElement()
                     Dragging = true
                     InitialPosition = Input.Position
                     InitialSize = Parent.Position
@@ -1317,25 +1318,25 @@
         end
 
         function Library:CloseElement() 
-            local IsMulti = typeof(Library.OpenElement)
-
             if not Library.OpenElement then 
                 return 
             end
 
-            for i = 1, #Library.OpenElement do
-                local Data = Library.OpenElement[i]
-
-                if Data.Ignore then 
-                    continue 
-                end 
-
-                Data.SetVisible(false)
-                Data.Open = false
+            if Library.OpenElement.SetVisible then 
+                Library.OpenElement.SetVisible(false)
+                Library.OpenElement.Open = false
+            elseif type(Library.OpenElement) == "table" then
+                for i = 1, #Library.OpenElement do
+                    local Data = Library.OpenElement[i]
+                    if Data and not Data.Ignore then 
+                        Data.SetVisible(false)
+                        Data.Open = false
+                    end
+                end
             end
 
-            Library.OpenElement = {}
-		end
+            Library.OpenElement = nil
+        end
 
         function Library:Create(instance, options)
             local ins = Instance.new(instance) 
@@ -1941,6 +1942,7 @@
             end
 
             function Cfg.ToggleMenu(bool) 
+                Library:CloseElement()
                 if Cfg.Tweening then 
                     return 
                 end 
@@ -4326,10 +4328,10 @@
                 Mode = properties.Mode or "Toggle";
                 Active = properties.Default or false; 
                 
-                Show = properties.ShowInList or true;
+                Show = properties.ShowInList ~= nil and properties.ShowInList or true;
 
                 Open = false;
-                Binding;
+                Binding = nil;
                 Ignore = false;
 
                 Items = {}
@@ -4400,7 +4402,9 @@
                 
                 -- Mode Holder
                     Items.ModeHolder = Library:Create( "Frame" , {
-                        Parent = Library.Items;
+                        Parent = Library.Other;
+                        Visible = false;
+                        ZIndex = 100;
                         Size = dim2(0, 150, 0, 44);
                         Name = "\0";
                         BorderColor3 = rgb(0, 0, 0);
@@ -4560,7 +4564,7 @@
                     Cfg.Key = input.Key or "NONE"
                     Cfg.Mode = input.Mode or "Toggle"
 
-                    if input.Active then
+                    if input.Active ~= nil then
                         Cfg.Active = input.Active
                     end
 
@@ -4572,7 +4576,7 @@
                 local text = (tostring(Cfg.Key) ~= "Enums" and (Keys[Cfg.Key] or tostring(Cfg.Key):gsub("Enum.", "")) or nil)
                 local __text = text and tostring(text):gsub("KeyCode.", ""):gsub("UserInputType.", "")
 
-                Items.Key.Text = __text
+                Items.Key.Text = __text or "NONE"
 
                 if Items.Keybinds then
                     Items.Keybinds.TextTransparency = 1
@@ -4582,7 +4586,7 @@
                     Library:Tween(Items.KeybindsStroke, {Transparency = 0})
 
                     Items.Keybinds.Visible = Cfg.Active
-                    Items.Keybinds.Text = string.format("[%s]: %s", __text, Cfg.Name or Cfg.Flag or "Key")
+                    Items.Keybinds.Text = string.format("[%s]: %s", __text or "NONE", Cfg.Name or Cfg.Flag or "Key")
                 end 
 
                 Flags[Cfg.Flag] = {
@@ -4593,11 +4597,34 @@
             end
 
             function Cfg.SetVisible(bool)
-                Items.Fade.BackgroundTransparency = 0
-                Library:Tween(Items.Fade, {BackgroundTransparency = 1})
+                if bool then
+                    if Library.OpenElement and Library.OpenElement ~= Cfg then
+                        Library:CloseElement()
+                    end
+                    Library.OpenElement = Cfg
+                else
+                    if Items.Dropdown then
+                        Items.Dropdown.SetVisible(false)
+                        Items.Dropdown.Open = false
+                    end
+                    if Library.OpenElement == Cfg then
+                        Library.OpenElement = nil
+                    end
+                end
 
-                Items.ModeHolder.Visible = bool 
-                Items.ModeHolder.Position = dim2(0, Items.KeybindOutline.AbsolutePosition.X + 2, 0, Items.KeybindOutline.AbsolutePosition.Y + 74)
+                Items.ModeHolder.Visible = bool
+                Items.ModeHolder.Parent = bool and Library.Items or Library.Other
+                
+                if bool then
+                    Items.ModeHolder.Position = dim2(
+                        0, 
+                        Items.KeybindOutline.AbsolutePosition.X - 150 + Items.KeybindOutline.AbsoluteSize.X, 
+                        0, 
+                        Items.KeybindOutline.AbsolutePosition.Y + Items.KeybindOutline.AbsoluteSize.Y + 4
+                    )
+                    Items.Fade.BackgroundTransparency = 0
+                    Library:Tween(Items.Fade, {BackgroundTransparency = 1})
+                end
             end
 
             Items.KeybindOutline.MouseButton1Down:Connect(function()
@@ -4607,25 +4634,28 @@
                 Cfg.Binding = Library:Connection(InputService.InputBegan, function(keycode, game_event)  
                     Cfg.Set(keycode.KeyCode ~= Enum.KeyCode.Unknown and keycode.KeyCode or keycode.UserInputType)
                     
-                    Cfg.Binding:Disconnect() 
-                    Cfg.Binding = nil
+                    if Cfg.Binding then
+                        Cfg.Binding:Disconnect() 
+                        Cfg.Binding = nil
+                    end
                 end)
             end)
 
             Items.KeybindOutline.MouseButton2Down:Connect(function()
                 Cfg.Open = not Cfg.Open 
-
                 Cfg.SetVisible(Cfg.Open)
             end)
 
             Library:Connection(InputService.InputBegan, function(input, game_event) 
-                if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                    if (Items.Dropdown.Items.DropdownElements.Visible and Items.ModeHolder.Visible) and not (Library:Hovering(Items.Dropdown.Items.DropdownElements) or Library:Hovering(Items.ModeHolder)) then 
-                        Items.Dropdown.SetVisible(false)
-                        Items.Dropdown.Visible = false
-
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.MouseButton2 then
+                    if Items.ModeHolder.Visible and not Library:Hovering({
+                        Items.ModeHolder, 
+                        Items.KeybindOutline,
+                        Items.Dropdown.Items.DropdownElements,
+                        Items.Dropdown.Items.Dropdown
+                    }) then 
+                        Cfg.Open = false
                         Cfg.SetVisible(false)
-                        Cfg.Open = false;
                     end 
                 end 
                 
